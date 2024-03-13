@@ -69,15 +69,24 @@ type namedVolume struct {
 	Options []string `json:"options" yaml:"options"`
 }
 
+type network struct {
+	StaticIps     []string `json:"staticIps" yaml:"staticIps"`
+	Aliases       []string `json:"aliases" yaml:"aliases"`
+	StaticMac     string   `json:"staticMac" yaml:"staticMac"`
+	InterfaceName string   `json:"interfaceName" yaml:"interfaceName"`
+}
+
 type RawPod struct {
-	Image   string            `json:"Image" yaml:"Image"`
-	Name    string            `json:"Name" yaml:"Name"`
-	Env     map[string]string `json:"Env" yaml:"Env"`
-	Ports   []port            `json:"Ports" yaml:"Ports"`
-	Mounts  []mount           `json:"Mounts" yaml:"Mounts"`
-	Volumes []namedVolume     `json:"Volumes" yaml:"Volumes"`
-	CapAdd  []string          `json:"CapAdd" yaml:"CapAdd"`
-	CapDrop []string          `json:"CapDrop" yaml:"CapDrop"`
+	Image    string             `json:"Image" yaml:"Image"`
+	Name     string             `json:"Name" yaml:"Name"`
+	Env      map[string]string  `json:"Env" yaml:"Env"`
+	Ports    []port             `json:"Ports" yaml:"Ports"`
+	Mounts   []mount            `json:"Mounts" yaml:"Mounts"`
+	Volumes  []namedVolume      `json:"Volumes" yaml:"Volumes"`
+	Networks map[string]network `json:"Networks" yaml:"Networks"`
+	CapAdd   []string           `json:"CapAdd" yaml:"CapAdd"`
+	CapDrop  []string           `json:"CapDrop" yaml:"CapDrop"`
+	Labels   map[string]string  `json:"Labels" yaml:"Labels"`
 }
 
 func (r *Raw) Process(ctx context.Context, conn context.Context, skew int) {
@@ -233,6 +242,18 @@ func convertVolumes(namedVolumes []namedVolume) []*specgen.NamedVolume {
 	return result
 }
 
+func convertNetworks(networks map[string]network) map[string]types.PerNetworkOptions {
+	result := map[string]types.PerNetworkOptions{}
+	for name, n := range networks {
+		toAppend := types.PerNetworkOptions{
+			Aliases:       n.Aliases,
+			InterfaceName: n.InterfaceName,
+		}
+		result[name] = toAppend
+	}
+	return result
+}
+
 func createSpecGen(raw RawPod) *specgen.SpecGenerator {
 	// Create a new container
 	s := specgen.NewSpecGenerator(raw.Image, false)
@@ -243,11 +264,15 @@ func createSpecGen(raw RawPod) *specgen.SpecGenerator {
 	s.Volumes = convertVolumes(raw.Volumes)
 	s.CapAdd = []string(raw.CapAdd)
 	s.CapDrop = []string(raw.CapDrop)
+	s.Networks = convertNetworks(raw.Networks)
+	s.NetNS = specgen.Namespace{
+		NSMode: "bridge",
+	}
 	s.RestartPolicy = "always"
 	// add a label to signify ownership of fetchit <--> this container
-	s.Labels = map[string]string{
-		"owned-by": FetchItLabel,
-	}
+	s.Labels = map[string]string(raw.Labels)
+	s.Labels["owned-by"] = FetchItLabel
+
 	return s
 }
 
